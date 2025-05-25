@@ -1,0 +1,194 @@
+// export.hl
+// Module for exporting biological data/models to common formats: FASTA, SBML, JSON, PDB
+
+import std.string
+import std.json
+import std.collections
+
+// --- FASTA Export ---
+// Format:
+// >label
+// SEQUENCE (wrapped at 60 chars per line)
+fn to_fasta(sequence: str, label: str) -> str {
+    let fasta = ">" + label + "\n"
+    let lines = []
+    let width = 60
+    let len = sequence.length
+    for i in 0 to len step width {
+        let end = if i + width > len { len } else { i + width }
+        lines.append(sequence.substring(i, end))
+    }
+    return fasta + lines.join("\n") + "\n"
+}
+
+// --- SBML Export ---
+// SBML (Systems Biology Markup Language) export for simple models
+// This is a simplified example that exports species and reactions in XML format
+
+// Example model type (user-defined, extendable)
+struct SBMLModel {
+    id: str
+    species: array<SBMLSpecies>
+    reactions: array<SBMLReaction>
+}
+
+struct SBMLSpecies {
+    id: str
+    name: str
+    initial_amount: float
+}
+
+struct SBMLReaction {
+    id: str
+    reactants: array<str>
+    products: array<str>
+    rate_law: str
+}
+
+// Helper to convert array of species/reactants/products to XML species refs
+fn species_refs_xml(ids: array<str>, tag: str) -> str {
+    let xml = []
+    for id in ids {
+        xml.append("    <speciesReference species=\"" + id + "\" />")
+    }
+    return xml.join("\n")
+}
+
+fn to_sbml(model: SBMLModel) -> str {
+    let xml = []
+    xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+    xml.append("<sbml xmlns=\"http://www.sbml.org/sbml/level2/version4\" level=\"2\" version=\"4\">")
+    xml.append("  <model id=\"" + model.id + "\">")
+    xml.append("    <listOfSpecies>")
+    for s in model.species {
+        xml.append("      <species id=\"" + s.id + "\" name=\"" + s.name + "\" initialAmount=\"" + s.initial_amount.to_str() + "\" />")
+    }
+    xml.append("    </listOfSpecies>")
+    xml.append("    <listOfReactions>")
+    for r in model.reactions {
+        xml.append("      <reaction id=\"" + r.id + "\">")
+        xml.append("        <listOfReactants>")
+        xml.append(species_refs_xml(r.reactants, "speciesReference"))
+        xml.append("        </listOfReactants>")
+        xml.append("        <listOfProducts>")
+        xml.append(species_refs_xml(r.products, "speciesReference"))
+        xml.append("        </listOfProducts>")
+        xml.append("        <kineticLaw>")
+        xml.append("          <math xmlns=\"http://www.w3.org/1998/Math/MathML\">")
+        xml.append("            <ci>" + r.rate_law + "</ci>")
+        xml.append("          </math>")
+        xml.append("        </kineticLaw>")
+        xml.append("      </reaction>")
+    }
+    xml.append("    </listOfReactions>")
+    xml.append("  </model>")
+    xml.append("</sbml>")
+    return xml.join("\n")
+}
+
+// --- JSON Export ---
+// Converts generic HelixLang models (dictionaries or structs) to JSON string for interop
+fn to_json(model: any) -> str {
+    // Uses standard library JSON serialization (mock example)
+    return json.serialize(model)
+}
+
+// --- PDB Export ---
+// Export a protein structure to PDB (Protein Data Bank) format
+// Simplified: outputs ATOM records with residue info and 3D coords
+
+struct PDBAtom {
+    serial: int
+    name: str
+    resName: str
+    chainID: char
+    resSeq: int
+    x: float
+    y: float
+    z: float
+    occupancy: float
+    tempFactor: float
+}
+
+// ProteinResidue as in protein.hl for integration
+struct ProteinResidue {
+    aa: char
+    coord: Coord3D
+}
+
+// One-letter AA to three-letter codes mapping
+fn aa_3letter(aa: char) -> str {
+    match aa {
+        'A' => "ALA", 'R' => "ARG", 'N' => "ASN", 'D' => "ASP",
+        'C' => "CYS", 'Q' => "GLN", 'E' => "GLU", 'G' => "GLY",
+        'H' => "HIS", 'I' => "ILE", 'L' => "LEU", 'K' => "LYS",
+        'M' => "MET", 'F' => "PHE", 'P' => "PRO", 'S' => "SER",
+        'T' => "THR", 'W' => "TRP", 'Y' => "TYR", 'V' => "VAL",
+        _ => "UNK"
+    }
+}
+
+fn to_pdb(protein: array<ProteinResidue>, chainID: char = 'A') -> str {
+    let pdb_lines = []
+    let serial = 1
+    for i in 0 to protein.length - 1 {
+        let res = protein[i]
+        let resName = aa_3letter(res.aa)
+        let line = format!(
+            "ATOM  {serial:5d}  CA  {resName} {chainID}{resSeq:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           C",
+            serial = serial,
+            resName = resName,
+            chainID = chainID,
+            resSeq = i + 1,
+            x = res.coord.x,
+            y = res.coord.y,
+            z = res.coord.z
+        )
+        pdb_lines.append(line)
+        serial += 1
+    }
+    pdb_lines.append("END")
+    return pdb_lines.join("\n")
+}
+
+// --- Example Usage ---
+
+fn example_exports() {
+    // FASTA example
+    let seq = "ATGCGTACGTAGCTAGCTAGCTAGCGTAGCTAGCTAGC"
+    let fasta = to_fasta(seq, "ExampleSeq")
+    println(fasta)
+
+    // SBML example model
+    let species = [
+        SBMLSpecies{id:"S1", name:"Glucose", initial_amount:10.0},
+        SBMLSpecies{id:"S2", name:"ATP", initial_amount:5.0},
+        SBMLSpecies{id:"S3", name:"ADP", initial_amount:0.0}
+    ]
+    let reactions = [
+        SBMLReaction{id:"R1", reactants:["S1","S2"], products:["S3"], rate_law:"k1*S1*S2"}
+    ]
+    let model = SBMLModel{id:"exampleModel", species:species, reactions:reactions}
+    let sbml_xml = to_sbml(model)
+    println(sbml_xml)
+
+    // JSON export (simple dict example)
+    let model_dict = {
+        "name": "TestModel",
+        "parameters": {"k1": 0.1, "k2": 0.05},
+        "species": ["S1", "S2", "S3"]
+    }
+    let json_str = to_json(model_dict)
+    println(json_str)
+
+    // PDB export example
+    let protein = []
+    for i in 0 to 4 {
+        protein.append(ProteinResidue{
+            aa: "ACDEG"[i],
+            coord: Coord3D{x:i as float, y:i as float * 1.5, z:0.0}
+        })
+    }
+    let pdb_str = to_pdb(protein)
+    println(pdb_str)
+}

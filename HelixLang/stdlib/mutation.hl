@@ -1,0 +1,207 @@
+// mutation.hl
+// Mutation module in HelixLang for genetic sequence mutation modeling and tracking
+
+import std.rand
+import std.string
+import std.collections
+
+// --- Types and Data Structures ---
+
+// A DNA sequence object that tracks the sequence string and mutation history
+struct SeqObject {
+    sequence: str
+    history: array<str> // records description of mutations applied over time
+}
+
+// Mutation types enumeration
+enum MutationType {
+    POINT,
+    INSERTION,
+    DELETION,
+    INVERSION,
+    TRANSLOCATION,
+    CROSSOVER
+}
+
+// --- Core Mutation Functions ---
+
+// Introduce random point mutations at specified mutation rate (per base probability)
+// Returns new SeqObject with mutations applied and history updated
+fn introduce_point_mutation(seq_obj: SeqObject, rate: float) -> SeqObject {
+    let bases = ['A', 'C', 'G', 'T']
+    let seq_chars = seq_obj.sequence.to_char_array()
+    let mutated_positions = []
+
+    for i in 0 to seq_chars.length - 1 {
+        if rand.float() < rate {
+            let original = seq_chars[i]
+            let alternatives = bases.filter(b => b != original)
+            let new_base = alternatives[rand.int(0, alternatives.length - 1)]
+            seq_chars[i] = new_base
+            mutated_positions.append(i)
+        }
+    }
+
+    let new_seq = seq_chars.join()
+    let new_history = seq_obj.history.clone()
+    if mutated_positions.length > 0 {
+        new_history.append("Point mutation at positions: " + mutated_positions.map(i => i.to_str()).join(", "))
+    } else {
+        new_history.append("No point mutations applied.")
+    }
+    return SeqObject{sequence: new_seq, history: new_history}
+}
+
+// Simulate crossover (single-point) between two sequences
+// Produces two offspring SeqObjects with history updated
+fn simulate_crossover(seq1: SeqObject, seq2: SeqObject) -> (SeqObject, SeqObject) {
+    let len = min(seq1.sequence.length, seq2.sequence.length)
+    if len < 2 {
+        return (seq1, seq2) // cannot crossover if too short
+    }
+    let cross_point = rand.int(1, len - 1)
+
+    let offspring1_seq = seq1.sequence.substring(0, cross_point) + seq2.sequence.substring(cross_point, seq2.sequence.length)
+    let offspring2_seq = seq2.sequence.substring(0, cross_point) + seq1.sequence.substring(cross_point, seq1.sequence.length)
+
+    let offspring1_history = seq1.history.clone()
+    let offspring2_history = seq2.history.clone()
+
+    offspring1_history.append("Crossover at position " + cross_point.to_str() + " with sequence 2")
+    offspring2_history.append("Crossover at position " + cross_point.to_str() + " with sequence 1")
+
+    return (
+        SeqObject{sequence: offspring1_seq, history: offspring1_history},
+        SeqObject{sequence: offspring2_seq, history: offspring2_history}
+    )
+}
+
+// Simulate insertion of a motif string at a random position
+fn simulate_insertion(seq_obj: SeqObject, motif: str) -> SeqObject {
+    let len = seq_obj.sequence.length
+    let pos = rand.int(0, len)
+    let new_seq = seq_obj.sequence.substring(0, pos) + motif + seq_obj.sequence.substring(pos, len)
+    let new_history = seq_obj.history.clone()
+    new_history.append("Insertion of motif '" + motif + "' at position " + pos.to_str())
+    return SeqObject{sequence: new_seq, history: new_history}
+}
+
+// Simulate deletion of a substring of given length at random position
+fn simulate_deletion(seq_obj: SeqObject, del_length: int) -> SeqObject {
+    let len = seq_obj.sequence.length
+    if del_length <= 0 || del_length > len {
+        return seq_obj // invalid deletion size
+    }
+    let pos = rand.int(0, len - del_length)
+    let new_seq = seq_obj.sequence.substring(0, pos) + seq_obj.sequence.substring(pos + del_length, len)
+    let new_history = seq_obj.history.clone()
+    new_history.append("Deletion of length " + del_length.to_str() + " at position " + pos.to_str())
+    return SeqObject{sequence: new_seq, history: new_history}
+}
+
+// Simulate inversion of a substring of given length at random position
+fn simulate_inversion(seq_obj: SeqObject, inv_length: int) -> SeqObject {
+    let len = seq_obj.sequence.length
+    if inv_length <= 0 || inv_length > len {
+        return seq_obj
+    }
+    let pos = rand.int(0, len - inv_length)
+    let segment = seq_obj.sequence.substring(pos, pos + inv_length)
+    let reversed_segment = segment.reverse()
+    let new_seq = seq_obj.sequence.substring(0, pos) + reversed_segment + seq_obj.sequence.substring(pos + inv_length, len)
+    let new_history = seq_obj.history.clone()
+    new_history.append("Inversion of length " + inv_length.to_str() + " at position " + pos.to_str())
+    return SeqObject{sequence: new_seq, history: new_history}
+}
+
+// Simulate translocation by swapping two substrings within the sequence
+fn simulate_translocation(seq_obj: SeqObject, len1: int, len2: int) -> SeqObject {
+    let len = seq_obj.sequence.length
+    if len1 <= 0 || len2 <= 0 || len1 + len2 > len {
+        return seq_obj
+    }
+    // Select two non-overlapping regions randomly
+    let pos1 = rand.int(0, len - len1)
+    let pos2_candidates = []
+    for p in 0 to len - len2 {
+        // Ensure no overlap
+        if p + len2 <= pos1 || p >= pos1 + len1 {
+            pos2_candidates.append(p)
+        }
+    }
+    if pos2_candidates.length == 0 {
+        return seq_obj // no suitable pos2 found
+    }
+    let pos2 = pos2_candidates[rand.int(0, pos2_candidates.length - 1)]
+
+    let seq_chars = seq_obj.sequence.to_char_array()
+
+    // Extract segments
+    let seg1 = seq_chars.slice(pos1, pos1 + len1)
+    let seg2 = seq_chars.slice(pos2, pos2 + len2)
+
+    // Swap segments
+    for i in 0 to len1 - 1 {
+        seq_chars[pos1 + i] = if i < len2 { seg2[i] } else { seq_chars[pos1 + i] }
+    }
+    for i in 0 to len2 - 1 {
+        seq_chars[pos2 + i] = if i < len1 { seg1[i] } else { seq_chars[pos2 + i] }
+    }
+
+    let new_seq = seq_chars.join()
+    let new_history = seq_obj.history.clone()
+    new_history.append("Translocation: swapped segments at positions " + pos1.to_str() + " and " + pos2.to_str() + " of lengths " + len1.to_str() + " and " + len2.to_str())
+    return SeqObject{sequence: new_seq, history: new_history}
+}
+
+// --- Mutation History Tracking ---
+
+fn track_mutation_history(seq_obj: SeqObject) {
+    println("Mutation History for Sequence:")
+    for i, event in seq_obj.history.enumerate() {
+        println("[" + i.to_str() + "] " + event)
+    }
+}
+
+// --- Utilities ---
+
+// Generate a random DNA sequence of given length
+fn random_sequence(length: int) -> str {
+    let bases = ['A', 'C', 'G', 'T']
+    let chars = []
+    for _ in 0 to length - 1 {
+        chars.append(bases[rand.int(0, 3)])
+    }
+    return chars.join()
+}
+
+// --- Example Usage ---
+
+fn example() {
+    // Create initial random sequence of length 50
+    let seq_obj = SeqObject{sequence: random_sequence(50), history: []}
+
+    // Apply point mutations at 1% rate
+    let mutated = introduce_point_mutation(seq_obj, 0.01)
+
+    // Insert motif "ATGCG" at random position
+    let inserted = simulate_insertion(mutated, "ATGCG")
+
+    // Delete a substring of length 3
+    let deleted = simulate_deletion(inserted, 3)
+
+    // Invert a substring of length 5
+    let inverted = simulate_inversion(deleted, 5)
+
+    // Translocate two segments of lengths 4 and 6
+    let translocated = simulate_translocation(inverted, 4, 6)
+
+    // Create second sequence for crossover
+    let seq2 = SeqObject{sequence: random_sequence(50), history: []}
+    let (offspring1, offspring2) = simulate_crossover(translocated, seq2)
+
+    // Print mutation histories
+    track_mutation_history(offspring1)
+    track_mutation_history(offspring2)
+}
+

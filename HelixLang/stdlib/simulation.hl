@@ -1,0 +1,245 @@
+// simulation.hl
+// Biological simulation engine for HelixLang
+// Includes cell cycle, diffusion, agent-based modeling, and core loop
+
+// --- Constants and Enums ---
+
+enum CellPhase {
+    G1,
+    S,
+    G2,
+    M,
+    DIVIDED,
+    APOPTOSIS
+}
+
+enum CellType {
+    STEM,
+    DIFFERENTIATED,
+    CANCEROUS
+}
+
+// --- Data Structures ---
+
+struct Cell {
+    id: int
+    phase: CellPhase
+    phase_time: float    // Time spent in current phase (hours)
+    genome_integrity: float // 0.0 to 1.0, 1.0 = perfect DNA
+    mutation_rate: float // Probability of mutation per division
+    position: (int, int) // Coordinates in grid for spatial simulation
+    cell_type: CellType
+    age: float           // total time alive
+    size: float          // Relative size, grows in G1 and G2
+}
+
+// Grid representing concentrations of chemicals (2D array)
+type Grid = array<array<float>>
+
+// --- Simulation Parameters ---
+
+struct SimulationParams {
+    timestep: float          // Hours per simulation step
+    max_time: float          // Max simulation runtime in hours
+    diffusion_rate: float    // Rate constant for diffusion (per timestep)
+    cell_division_threshold: float  // Cell size threshold for division
+    mutation_chance: float   // Base mutation chance per division
+    grid_size: (int, int)
+}
+
+// --- Cell Cycle Durations (in hours) ---
+const CELL_CYCLE_DURATIONS = {
+    CellPhase.G1: 10.0,
+    CellPhase.S: 8.0,
+    CellPhase.G2: 4.0,
+    CellPhase.M: 1.0
+}
+
+// --- Core Functions ---
+
+// Advance cell cycle by timestep, handle phase transitions & mutations
+fn simulate_cell_cycle(cell: Cell, params: SimulationParams) -> Cell {
+    cell.phase_time += params.timestep
+    cell.age += params.timestep
+
+    // Check for DNA damage leading to apoptosis (simplified)
+    if cell.genome_integrity < 0.3 {
+        cell.phase = CellPhase.APOPTOSIS
+        return cell
+    }
+
+    // Phase progression
+    let phase_duration = CELL_CYCLE_DURATIONS[cell.phase]
+    if cell.phase_time >= phase_duration {
+        // Move to next phase
+        match cell.phase {
+            CellPhase.G1 => {
+                cell.phase = CellPhase.S
+            },
+            CellPhase.S => {
+                // DNA replication errors can reduce genome integrity
+                cell.genome_integrity -= random_float(0.0, 0.05)
+                cell.phase = CellPhase.G2
+            },
+            CellPhase.G2 => {
+                cell.phase = CellPhase.M
+            },
+            CellPhase.M => {
+                cell.phase = CellPhase.DIVIDED
+            },
+            _ => {}
+        }
+        cell.phase_time = 0.0
+    }
+
+    // Cell grows in size during G1 and G2 phases
+    if cell.phase == CellPhase.G1 || cell.phase == CellPhase.G2 {
+        cell.size += 0.1 * params.timestep // growth rate arbitrary
+    }
+
+    return cell
+}
+
+// Simulate cell division, returns two daughter cells with possible mutations
+fn divide_cell(parent: Cell, next_id: int, params: SimulationParams) -> (Cell, Cell) {
+    if parent.size < params.cell_division_threshold || parent.phase != CellPhase.DIVIDED {
+        error("Cell not ready for division")
+    }
+    
+    // Reset parent and create daughter cells
+    let base_genome_integrity = parent.genome_integrity
+    
+    // Mutation can occur during division
+    let mutation_occurs = random_float(0.0, 1.0) < parent.mutation_rate
+    
+    // Daughter 1
+    let daughter1 = Cell{
+        id: next_id,
+        phase: CellPhase.G1,
+        phase_time: 0.0,
+        genome_integrity: if mutation_occurs { base_genome_integrity - random_float(0.01, 0.1) } else { base_genome_integrity },
+        mutation_rate: parent.mutation_rate,
+        position: (parent.position.0 + 1, parent.position.1),
+        cell_type: parent.cell_type,
+        age: 0.0,
+        size: parent.size / 2
+    }
+
+    // Daughter 2
+    let daughter2 = Cell{
+        id: next_id + 1,
+        phase: CellPhase.G1,
+        phase_time: 0.0,
+        genome_integrity: if mutation_occurs { base_genome_integrity - random_float(0.01, 0.1) } else { base_genome_integrity },
+        mutation_rate: parent.mutation_rate,
+        position: (parent.position.0 - 1, parent.position.1),
+        cell_type: parent.cell_type,
+        age: 0.0,
+        size: parent.size / 2
+    }
+
+    return (daughter1, daughter2)
+}
+
+// Simulate diffusion of chemicals on a 2D grid using discrete Laplacian approximation
+fn simulate_diffusion(grid: Grid, diffusion_rate: float, timestep: float) -> Grid {
+    let rows = grid.length
+    let cols = grid[0].length
+    let new_grid = create_2d_array(rows, cols, 0.0)
+    
+    for r in 0 to rows - 1 {
+        for c in 0 to cols - 1 {
+            let center = grid[r][c]
+            let neighbors = []
+            if r > 0 { neighbors.append(grid[r-1][c]) }
+            if r < rows - 1 { neighbors.append(grid[r+1][c]) }
+            if c > 0 { neighbors.append(grid[r][c-1]) }
+            if c < cols - 1 { neighbors.append(grid[r][c+1]) }
+
+            // Discrete Laplacian diffusion step
+            let diffusion_term = diffusion_rate * timestep * (neighbors.sum() - neighbors.length * center)
+            new_grid[r][c] = center + diffusion_term
+            // Clamp to zero minimum concentration
+            if new_grid[r][c] < 0.0 {
+                new_grid[r][c] = 0.0
+            }
+        }
+    }
+    return new_grid
+}
+
+// Core simulation loop managing cells and chemical grid
+fn run_simulation(params: SimulationParams) {
+    // Initialize cells (single stem cell in middle)
+    let cells = [Cell{
+        id: 0,
+        phase: CellPhase.G1,
+        phase_time: 0.0,
+        genome_integrity: 1.0,
+        mutation_rate: params.mutation_chance,
+        position: (params.grid_size.0 / 2, params.grid_size.1 / 2),
+        cell_type: CellType.STEM,
+        age: 0.0,
+        size: 1.0
+    }]
+    let chemical_grid = create_2d_array(params.grid_size.0, params.grid_size.1, 1.0) // uniform initial concentration
+
+    let time = 0.0
+    let next_cell_id = 1
+    let active_cells = cells
+    let grid = chemical_grid
+
+    while time < params.max_time {
+        // Update cells
+        let new_cells = []
+        for cell in active_cells {
+            if cell.phase != CellPhase.APOPTOSIS {
+                let updated_cell = simulate_cell_cycle(cell, params)
+                if updated_cell.phase == CellPhase.DIVIDED {
+                    let (d1, d2) = divide_cell(updated_cell, next_cell_id, params)
+                    next_cell_id += 2
+                    new_cells.append(d1)
+                    new_cells.append(d2)
+                } else {
+                    new_cells.append(updated_cell)
+                }
+            }
+            // Dead cells (apoptosis) removed from population
+        }
+
+        // Simulate diffusion of chemicals
+        let new_grid = simulate_diffusion(grid, params.diffusion_rate, params.timestep)
+
+        // Update for next iteration
+        active_cells = new_cells
+        grid = new_grid
+        time += params.timestep
+
+        // Logging for debug - can be extended or replaced by events
+        println("Time: ", time, " Active cells: ", active_cells.length)
+    }
+}
+
+// Utility: create 2D array helper
+fn create_2d_array(rows: int, cols: int, initial: float) -> Grid {
+    let arr = []
+    for _ in 0 to rows - 1 {
+        let row = []
+        for _ in 0 to cols - 1 {
+            row.append(initial)
+        }
+        arr.append(row)
+    }
+    return arr
+}
+
+// --- Random Utilities ---
+
+// Random float generator between min and max inclusive
+fn random_float(min: float, max: float) -> float {
+    // Stub: replace with built-in random generator if available
+    // For demo, returns midpoint
+    return (min + max) / 2
+}
+
+// --- End of simulation.hl ---

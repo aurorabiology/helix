@@ -1,0 +1,262 @@
+// genetics.hl
+// Comprehensive genetics utilities for HelixLang
+// Provides DNA/RNA sequence manipulation, validation, mutation, translation, and analysis.
+
+// --- Constants ---
+
+// Valid nucleotide bases for DNA and RNA
+const DNA_BASES = "ACGT"
+const RNA_BASES = "ACGU"
+
+// Codon table: maps RNA codons (triplets) to amino acids (single-letter codes)
+const CODON_TABLE = {
+    "UUU": "F", "UUC": "F",
+    "UUA": "L", "UUG": "L", "CUU": "L", "CUC": "L", "CUA": "L", "CUG": "L",
+    "AUU": "I", "AUC": "I", "AUA": "I",
+    "AUG": "M", // Start codon (Methionine)
+    "GUU": "V", "GUC": "V", "GUA": "V", "GUG": "V",
+    "UCU": "S", "UCC": "S", "UCA": "S", "UCG": "S", "AGU": "S", "AGC": "S",
+    "CCU": "P", "CCC": "P", "CCA": "P", "CCG": "P",
+    "ACU": "T", "ACC": "T", "ACA": "T", "ACG": "T",
+    "GCU": "A", "GCC": "A", "GCA": "A", "GCG": "A",
+    "UAU": "Y", "UAC": "Y",
+    "UAA": "*", "UAG": "*", "UGA": "*", // Stop codons
+    "CAU": "H", "CAC": "H",
+    "CAA": "Q", "CAG": "Q",
+    "AAU": "N", "AAC": "N",
+    "AAA": "K", "AAG": "K",
+    "GAU": "D", "GAC": "D",
+    "GAA": "E", "GAG": "E",
+    "UGU": "C", "UGC": "C",
+    "UGG": "W",
+    "CGU": "R", "CGC": "R", "CGA": "R", "CGG": "R", "AGA": "R", "AGG": "R",
+    "GGU": "G", "GGC": "G", "GGA": "G", "GGG": "G"
+}
+
+// --- Utility Functions ---
+
+// Validates if a given sequence contains only valid DNA bases
+fn is_valid_dna(seq: string) -> bool {
+    for c in seq {
+        if !DNA_BASES.contains(c) {
+            return false
+        }
+    }
+    return true
+}
+
+// Validates if a given sequence contains only valid RNA bases
+fn is_valid_rna(seq: string) -> bool {
+    for c in seq {
+        if !RNA_BASES.contains(c) {
+            return false
+        }
+    }
+    return true
+}
+
+// Transcribes a DNA sequence to RNA by replacing T with U
+fn transcribe(dna: string) -> string {
+    if !is_valid_dna(dna) {
+        error("Invalid DNA sequence")
+    }
+    return dna.replace("T", "U")
+}
+
+// Reverse complements a DNA or RNA sequence
+fn reverse_complement(seq: string) -> string {
+    // Define complement mapping for DNA and RNA
+    let complement_map = {
+        'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C', // DNA
+        'U': 'A' // RNA complementary to A
+    }
+    // Build complement strand
+    let complement_seq = ""
+    for c in seq {
+        if complement_map.contains_key(c) {
+            complement_seq += complement_map[c]
+        } else {
+            error("Invalid base in sequence for complement")
+        }
+    }
+    return complement_seq.reverse()
+}
+
+// Calculate GC content (%) of DNA/RNA sequence
+fn gc_content(seq: string) -> float {
+    let gc_count = 0
+    let valid_bases = 0
+    for c in seq {
+        if "GC".contains(c) {
+            gc_count += 1
+        }
+        if "ACGTU".contains(c) {
+            valid_bases += 1
+        }
+    }
+    if valid_bases == 0 {
+        return 0.0
+    }
+    return (gc_count as float / valid_bases as float) * 100.0
+}
+
+// Mutate a sequence at a specified mutation rate (0.0 to 1.0)
+// Randomly replaces bases with a different valid base
+fn mutate(seq: string, rate: float) -> string {
+    if rate < 0.0 or rate > 1.0 {
+        error("Mutation rate must be between 0 and 1")
+    }
+    let mutated_seq = ""
+    let rng = Random.new() // Assumes Random class available
+    for base in seq {
+        if rng.next_float() < rate {
+            // Select a random base different from current
+            let bases = DNA_BASES.replace(base, "")
+            let new_base = bases[rng.next_int(0, bases.length - 1)]
+            mutated_seq += new_base
+        } else {
+            mutated_seq += base
+        }
+    }
+    return mutated_seq
+}
+
+// Translate RNA sequence into amino acid sequence (protein)
+fn translate(rna: string) -> string {
+    if !is_valid_rna(rna) {
+        error("Invalid RNA sequence for translation")
+    }
+    let protein = ""
+    for i in 0 to rna.length - 3 step 3 {
+        let codon = rna.substring(i, i+3)
+        if CODON_TABLE.contains_key(codon) {
+            let aa = CODON_TABLE[codon]
+            if aa == "*" {
+                // Stop codon reached
+                break
+            }
+            protein += aa
+        } else {
+            error("Invalid codon: " + codon)
+        }
+    }
+    return protein
+}
+
+// Find all open reading frames (ORFs) in an RNA sequence
+fn find_orfs(rna: string) -> list<string> {
+    let orfs = []
+    for frame in 0 to 2 {
+        let orf = ""
+        for i in frame to rna.length - 3 step 3 {
+            let codon = rna.substring(i, i+3)
+            if codon == "AUG" {
+                orf = "M"
+                // Translate until stop codon
+                for j in i+3 to rna.length - 3 step 3 {
+                    let next_codon = rna.substring(j, j+3)
+                    let aa = CODON_TABLE.get(next_codon, "?")
+                    if aa == "*" {
+                        orfs.append(orf)
+                        break
+                    }
+                    orf += aa
+                }
+            }
+        }
+    }
+    return orfs
+}
+
+// Complementary base pairing for DNA/RNA strands - returns a list of paired tuples (base1, base2)
+fn base_pairing(seq1: string, seq2: string) -> list<(char, char)> {
+    if seq1.length != seq2.length {
+        error("Sequences must be same length for base pairing")
+    }
+    let pairs = []
+    for i in 0 to seq1.length - 1 {
+        pairs.append((seq1[i], seq2[i]))
+    }
+    return pairs
+}
+
+// Hamming distance between two sequences (number of differing bases)
+fn hamming_distance(seq1: string, seq2: string) -> int {
+    if seq1.length != seq2.length {
+        error("Sequences must be same length to compute Hamming distance")
+    }
+    let dist = 0
+    for i in 0 to seq1.length - 1 {
+        if seq1[i] != seq2[i] {
+            dist += 1
+        }
+    }
+    return dist
+}
+
+// Transcribe a DNA sequence to its reverse complement RNA sequence
+fn reverse_transcribe(dna: string) -> string {
+    return transcribe(reverse_complement(dna))
+}
+
+// Count occurrences of each nucleotide in a sequence
+fn nucleotide_count(seq: string) -> map<char, int> {
+    let counts = {'A':0, 'C':0, 'G':0, 'T':0, 'U':0}
+    for c in seq {
+        if counts.contains_key(c) {
+            counts[c] += 1
+        }
+    }
+    return counts
+}
+
+// Find motifs (subsequences) in sequence; returns indices where motif starts
+fn find_motifs(seq: string, motif: string) -> list<int> {
+    let positions = []
+    for i in 0 to seq.length - motif.length {
+        if seq.substring(i, i+motif.length) == motif {
+            positions.append(i)
+        }
+    }
+    return positions
+}
+
+// Translate DNA directly (by transcribing first then translating)
+fn translate_dna(dna: string) -> string {
+    let rna = transcribe(dna)
+    return translate(rna)
+}
+
+// Calculate melting temperature (Tm) using Wallace rule for short oligos
+fn melting_temp(seq: string) -> float {
+    let A_count = nucleotide_count(seq)['A']
+    let T_count = nucleotide_count(seq)['T'] + nucleotide_count(seq)['U']
+    let G_count = nucleotide_count(seq)['G']
+    let C_count = nucleotide_count(seq)['C']
+    // Wallace Rule: Tm = 2*(A+T) + 4*(G+C)
+    return 2.0 * (A_count + T_count) + 4.0 * (G_count + C_count)
+}
+
+// Generate all possible single nucleotide polymorphisms (SNPs) at each position
+fn generate_snps(seq: string) -> list<string> {
+    let snps = []
+    for i in 0 to seq.length - 1 {
+        let base = seq[i]
+        let alternatives = DNA_BASES.replace(base, "")
+        for alt in alternatives {
+            let mutated = seq.substring(0, i) + alt + seq.substring(i + 1)
+            snps.append(mutated)
+        }
+    }
+    return snps
+}
+
+// Compute reverse complement for large sequences efficiently (generator style)
+fn reverse_complement_generator(seq: string) -> generator<char> {
+    let complement_map = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'U':'A'}
+    for i in seq.length - 1 down_to 0 {
+        yield complement_map[seq[i]]
+    }
+}
+
+// --- End of genetics.hl ---

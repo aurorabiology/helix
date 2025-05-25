@@ -1,0 +1,212 @@
+// protein.hl
+// Protein sequence utilities for HelixLang
+// Handles protein mass computation, secondary structure prediction,
+// folding integration, and sequence-to-structure conversion.
+
+// --- Constants ---
+
+// Monoisotopic mass (in Daltons) of standard amino acids (single-letter code)
+const AMINO_ACID_MASS_TABLE = {
+    'A': 71.03711,  // Alanine
+    'R': 156.10111, // Arginine
+    'N': 114.04293, // Asparagine
+    'D': 115.02694, // Aspartic Acid
+    'C': 103.00919, // Cysteine
+    'E': 129.04259, // Glutamic Acid
+    'Q': 128.05858, // Glutamine
+    'G': 57.02146,  // Glycine
+    'H': 137.05891, // Histidine
+    'I': 113.08406, // Isoleucine
+    'L': 113.08406, // Leucine
+    'K': 128.09496, // Lysine
+    'M': 131.04049, // Methionine
+    'F': 147.06841, // Phenylalanine
+    'P': 97.05276,  // Proline
+    'S': 87.03203,  // Serine
+    'T': 101.04768, // Threonine
+    'W': 186.07931, // Tryptophan
+    'Y': 163.06333, // Tyrosine
+    'V': 99.06841   // Valine
+}
+
+// --- Core Functions ---
+
+// Validate protein sequence contains only valid amino acids
+fn is_valid_protein(seq: string) -> bool {
+    for aa in seq {
+        if !AMINO_ACID_MASS_TABLE.contains_key(aa) {
+            return false
+        }
+    }
+    return true
+}
+
+// Compute total mass of a protein sequence (sum of amino acid masses)
+// Assumes average residue mass without post-translational modifications
+fn compute_mass(seq: string) -> float {
+    if !is_valid_protein(seq) {
+        error("Invalid amino acid in protein sequence")
+    }
+    let total_mass = 0.0
+    for aa in seq {
+        total_mass += AMINO_ACID_MASS_TABLE[aa]
+    }
+    // Subtract water mass (18.01528 Da) for each peptide bond formed (length-1)
+    let water_mass = 18.01528
+    if seq.length > 1 {
+        total_mass -= (seq.length - 1) * water_mass
+    }
+    return total_mass
+}
+
+// Predict secondary structure using a simple heuristic based on amino acid propensities
+// Returns string with 'H' for helix, 'E' for sheet, 'C' for coil per residue
+fn secondary_structure(seq: string) -> string {
+    // Simplified propensities from Chou-Fasman (thresholds are arbitrary for demonstration)
+    const HELIX_AAS = ['A', 'L', 'M', 'Q', 'E', 'K', 'R', 'H']
+    const SHEET_AAS = ['V', 'I', 'Y', 'F', 'W', 'T']
+    
+    let structure = ""
+    for aa in seq {
+        if HELIX_AAS.contains(aa) {
+            structure += 'H' // Alpha-helix
+        } else if SHEET_AAS.contains(aa) {
+            structure += 'E' // Beta-sheet
+        } else {
+            structure += 'C' // Coil/loop
+        }
+    }
+    return structure
+}
+
+// Wrapper to interface with external folding prediction tools/plugins
+// e.g., could invoke AlphaFold plugin or other ML model interfaces
+// Here, simulated with a placeholder heuristic returning dummy 3D coordinates
+fn fold(sequence: string) -> map<int, (float, float, float)> {
+    if !is_valid_protein(sequence) {
+        error("Invalid protein sequence for folding")
+    }
+    // For demo: generate a linear chain of alpha carbons in 3D space
+    let coords = {}
+    let step = 3.8 // Approximate Cα-Cα distance in Angstroms
+    for i in 0 to sequence.length - 1 {
+        coords[i] = (i * step, 0.0, 0.0)
+    }
+    return coords
+}
+
+// Convert protein sequence and secondary structure to a simple 3D "ribbon" representation
+// Returns list of tuples (index, aa, struct, coord)
+fn to_ribbon_model(seq: string, sec_struct: string) -> list<(int, char, char, (float, float, float))> {
+    if seq.length != sec_struct.length {
+        error("Sequence and secondary structure length mismatch")
+    }
+    let coords = fold(seq)
+    let ribbon = []
+    for i in 0 to seq.length - 1 {
+        ribbon.append((i, seq[i], sec_struct[i], coords[i]))
+    }
+    return ribbon
+}
+
+// Calculate isoelectric point (pI) estimate using simple Henderson-Hasselbalch approach
+// Uses pKa values for ionizable groups and counts residues
+fn isoelectric_point(seq: string) -> float {
+    // pKa values for amino acid side chains
+    const pKa = {
+        'C': 8.3,
+        'D': 3.9,
+        'E': 4.1,
+        'H': 6.0,
+        'K': 10.5,
+        'R': 12.5,
+        'Y': 10.1
+    }
+    // Count ionizable residues
+    let counts = {'C': 0, 'D': 0, 'E': 0, 'H': 0, 'K': 0, 'R': 0, 'Y': 0}
+    for aa in seq {
+        if counts.contains_key(aa) {
+            counts[aa] += 1
+        }
+    }
+    // Approximate pI by scanning pH 0 to 14, calculating net charge, find zero crossing
+    for pH in 0.0 to 14.0 step 0.01 {
+        // Calculate net charge
+        let net_charge = 0.0
+        // Positively charged groups
+        net_charge += counts['K'] * (1 / (1 + 10.0**(pH - pKa['K'])))
+        net_charge += counts['R'] * (1 / (1 + 10.0**(pH - pKa['R'])))
+        net_charge += counts['H'] * (1 / (1 + 10.0**(pH - pKa['H'])))
+        // Negatively charged groups
+        net_charge -= counts['D'] * (1 / (1 + 10.0**(pKa['D'] - pH)))
+        net_charge -= counts['E'] * (1 / (1 + 10.0**(pKa['E'] - pH)))
+        net_charge -= counts['C'] * (1 / (1 + 10.0**(pKa['C'] - pH)))
+        net_charge -= counts['Y'] * (1 / (1 + 10.0**(pKa['Y'] - pH)))
+        // Approximate N-terminus and C-terminus contributions
+        net_charge += 1 / (1 + 10.0**(pH - 9.6))   // N-term ~9.6
+        net_charge -= 1 / (1 + 10.0**(2.4 - pH))   // C-term ~2.4
+        
+        if abs(net_charge) < 0.01 {
+            return pH
+        }
+    }
+    return -1.0 // If no pI found in range
+}
+
+// Calculate hydrophobicity profile using Kyte-Doolittle scale (per residue)
+// Returns list of floats (hydrophobicity values)
+const HYDROPHOBICITY_SCALE = {
+    'A': 1.8, 'R': -4.5, 'N': -3.5, 'D': -3.5, 'C': 2.5,
+    'Q': -3.5, 'E': -3.5, 'G': -0.4, 'H': -3.2, 'I': 4.5,
+    'L': 3.8, 'K': -3.9, 'M': 1.9, 'F': 2.8, 'P': -1.6,
+    'S': -0.8, 'T': -0.7, 'W': -0.9, 'Y': -1.3, 'V': 4.2
+}
+fn hydrophobicity_profile(seq: string) -> list<float> {
+    let profile = []
+    for aa in seq {
+        if HYDROPHOBICITY_SCALE.contains_key(aa) {
+            profile.append(HYDROPHOBICITY_SCALE[aa])
+        } else {
+            profile.append(0.0)
+        }
+    }
+    return profile
+}
+
+// --- Integration Hooks ---
+
+// Placeholder function to invoke AlphaFold or other folding ML models externally
+// The actual implementation should interface with Python or REST API calls
+fn invoke_alphafold_plugin(sequence: string) -> map<int, (float, float, float)> {
+    // Pseudo-code: send seq to Python API, receive predicted coords
+    error("AlphaFold plugin integration not implemented")
+    return {}
+}
+
+// Export protein structure to PDB format string (minimal)
+// For demo: only writes backbone CA atoms with coords
+fn export_to_pdb(seq: string, coords: map<int, (float, float, float)>) -> string {
+    if seq.length != coords.size {
+        error("Sequence and coordinates length mismatch")
+    }
+    let pdb_lines = []
+    for i in 0 to seq.length - 1 {
+        let (x, y, z) = coords[i]
+        // Format: ATOM serial name resName chainID resSeq x y z occupancy tempFactor element
+        let line = format("ATOM  {:5d}  CA  {:3s} A{:4d}    {:8.3f}{:8.3f}{:8.3f}  1.00  0.00           C",
+                          i+1, seq[i], i+1, x, y, z)
+        pdb_lines.append(line)
+    }
+    pdb_lines.append("END")
+    return pdb_lines.join("\n")
+}
+
+// --- Example Usage ---
+// let protein_seq = "MVLSPADKTNVKAAW"
+// let mass = compute_mass(protein_seq)
+// let sec_struct = secondary_structure(protein_seq)
+// let folded_coords = fold(protein_seq)
+// let ribbon = to_ribbon_model(protein_seq, sec_struct)
+// let pdb_data = export_to_pdb(protein_seq, folded_coords)
+
+// --- End of protein.hl ---

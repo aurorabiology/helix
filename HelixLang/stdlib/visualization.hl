@@ -1,0 +1,201 @@
+// visualization.hl
+// Visualization module for biological data in HelixLang
+// Includes plots for GC content, protein structure rendering, simulation grids, and mutation highlighting
+
+import std.graphics
+import std.string
+import std.math
+import std.collections
+
+// --- GC Content Plotting ---
+
+// Calculate GC content in sliding windows of size window_size over sequence
+fn gc_content_sliding_window(sequence: str, window_size: int) -> array<float> {
+    let gc_array = []
+    let len = sequence.length
+    for i in 0 to len - window_size {
+        let window = sequence.substring(i, i + window_size)
+        let gc_count = 0
+        for c in window.to_char_array() {
+            if c == 'G' || c == 'C' {
+                gc_count += 1
+            }
+        }
+        let gc_fraction = (gc_count as float) / (window_size as float)
+        gc_array.append(gc_fraction)
+    }
+    return gc_array
+}
+
+// Plot GC content using a simple line graph (mock graphics API)
+fn plot_gc_content(sequence: str, window_size: int = 50) {
+    let gc_values = gc_content_sliding_window(sequence, window_size)
+    let width = gc_values.length
+    let height = 100  // arbitrary scale for plot
+
+    let canvas = Canvas.new(width, height)
+
+    // Draw baseline
+    canvas.draw_line(0, height / 2, width, height / 2, color="gray")
+
+    // Plot GC content line scaled to height
+    for i in 1 to gc_values.length - 1 {
+        let x1 = i - 1
+        let y1 = height - int(gc_values[i - 1] * height)
+        let x2 = i
+        let y2 = height - int(gc_values[i] * height)
+        canvas.draw_line(x1, y1, x2, y2, color="green")
+    }
+    canvas.show("GC Content Plot")
+}
+
+// --- Protein Structure Visualization ---
+
+// Simplified 3D coordinate for an amino acid residue
+struct Coord3D {
+    x: float
+    y: float
+    z: float
+}
+
+// Simplified protein residue struct with 3D position and amino acid code
+struct ProteinResidue {
+    aa: char
+    coord: Coord3D
+}
+
+// Render protein residues as 3D spheres connected by lines (simplified)
+// Could be hooked to external 3D viewer
+fn render_protein_structure(protein: array<ProteinResidue>) {
+    let canvas = Canvas3D.new(800, 600)
+    canvas.set_background("black")
+
+    // Draw bonds between residues
+    for i in 0 to protein.length - 2 {
+        let a = protein[i].coord
+        let b = protein[i + 1].coord
+        canvas.draw_line_3d(a.x, a.y, a.z, b.x, b.y, b.z, color="lightblue")
+    }
+
+    // Draw residues as spheres colored by amino acid properties (hydrophobicity)
+    for residue in protein {
+        let color = aa_color_map(residue.aa)
+        canvas.draw_sphere(residue.coord.x, residue.coord.y, residue.coord.z, radius=0.5, color=color)
+    }
+
+    canvas.show("Protein Structure Visualization")
+}
+
+// Map amino acids to color based on hydrophobicity (example scheme)
+fn aa_color_map(aa: char) -> str {
+    match aa {
+        'A' | 'V' | 'I' | 'L' | 'M' | 'F' => "orange",  // hydrophobic
+        'R' | 'K' | 'D' | 'E' | 'N' | 'Q' => "blue",    // polar/charged
+        'S' | 'T' | 'Y' | 'H' | 'C' | 'W' | 'P' => "green",
+        _ => "gray"
+    }
+}
+
+// --- Simulation Grid Visualization ---
+
+// Grid state is 2D array of chemical concentrations or cell states
+type GridState = array<array<float>>
+
+// Render a 2D heatmap of the grid with gradient color scale
+fn show_simulation_grid(grid_state: GridState) {
+    let rows = grid_state.length
+    let cols = grid_state[0].length
+    let canvas = Canvas.new(cols, rows)
+
+    // Find min/max values for normalization
+    var min_val = grid_state[0][0]
+    var max_val = grid_state[0][0]
+    for row in grid_state {
+        for val in row {
+            if val < min_val { min_val = val }
+            if val > max_val { max_val = val }
+        }
+    }
+
+    // Normalize and color map (blue to red gradient)
+    for i in 0 to rows - 1 {
+        for j in 0 to cols - 1 {
+            let norm_val = if max_val == min_val { 0.0 } else { (grid_state[i][j] - min_val) / (max_val - min_val) }
+            let color = color_gradient(norm_val)
+            canvas.set_pixel(j, i, color)
+        }
+    }
+
+    canvas.show("Simulation Grid Heatmap")
+}
+
+// Gradient from blue (0.0) to red (1.0)
+fn color_gradient(value: float) -> str {
+    let r = int(value * 255)
+    let g = 0
+    let b = int((1.0 - value) * 255)
+    return "rgb(" + r.to_str() + "," + g.to_str() + "," + b.to_str() + ")"
+}
+
+// --- Mutation Highlighting ---
+
+// Highlight differences between original and mutated sequences
+// Returns a string with mutation positions highlighted (simple console output for now)
+fn highlight_mutations(original: str, mutated: str) -> str {
+    let len = min(original.length, mutated.length)
+    let highlighted = []
+
+    for i in 0 to len - 1 {
+        if original[i] != mutated[i] {
+            // Uppercase mutated bases to highlight
+            highlighted.append(mutated[i].to_uppercase())
+        } else {
+            highlighted.append(mutated[i])
+        }
+    }
+    // Append remaining bases if mutated is longer
+    if mutated.length > len {
+        highlighted.append(mutated.substring(len, mutated.length).to_uppercase())
+    }
+
+    return highlighted.join()
+}
+
+// --- Example Combined Visualization ---
+
+fn example() {
+    let dna_seq = "ACGTGCGTACGTTAGCGTAGCTAGCTGACTGACGATCGTAGCTAGCTAGC"
+
+    // GC content plot
+    plot_gc_content(dna_seq, 10)
+
+    // Protein structure rendering example: simple linear chain with dummy coordinates
+    let protein = []
+    for i in 0 to 19 {
+        protein.append(ProteinResidue{
+            aa: "ACDEFGHIKLMNPQRSTVWY"[i % 20],
+            coord: Coord3D{ x: i as float, y: sin(i as float / 2.0) * 2.0, z: cos(i as float / 2.0) * 2.0 }
+        })
+    }
+    render_protein_structure(protein)
+
+    // Simulation grid example
+    let grid = []
+    for i in 0 to 49 {
+        let row = []
+        for j in 0 to 49 {
+            row.append(sin(i as float * 0.1) * cos(j as float * 0.1) + 1.0)  // values from 0 to 2 approx
+        }
+        grid.append(row)
+    }
+    show_simulation_grid(grid)
+
+    // Mutation highlighting example
+    let original_seq = "ACGTACGTACGT"
+    let mutated_seq = "ACCTACATACGG"
+    let highlighted_str = highlight_mutations(original_seq, mutated_seq)
+    println("Mutation Highlighting:")
+    println("Original: " + original_seq)
+    println("Mutated : " + highlighted_str)
+}
+

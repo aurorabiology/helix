@@ -1,0 +1,240 @@
+// environment.hl
+// Simulation environment modeling for biological simulations in HelixLang
+// Includes chemical concentration grids, temperature, pH, nutrient profiles, and gradients
+
+// --- Constants and Types ---
+
+// Supported molecule types in environment
+enum Molecule {
+    OXYGEN,
+    GLUCOSE,
+    AMINO_ACIDS,
+    MORPHOGEN_A,
+    MORPHOGEN_B,
+    TOXINS
+}
+
+// Environment template types
+enum EnvironmentTemplate {
+    PETRI_DISH,
+    TISSUE_SAMPLE,
+    GRADIENT_FIELD
+}
+
+// 2D float grid for spatial fields like concentrations, temperature, etc.
+type Grid2D = array<array<float>>
+
+// Region defined by top-left and bottom-right coordinates (inclusive)
+struct Region {
+    top_left: (int, int)
+    bottom_right: (int, int)
+}
+
+// Nutrient profile configuration
+struct NutrientProfile {
+    name: str
+    base_concentrations: map<Molecule, float>
+    diffusion_rates: map<Molecule, float>
+    consumption_rates: map<Molecule, float> // per cell or per timestep
+}
+
+// Complete environment data structure
+struct Environment {
+    width: int
+    height: int
+    molecule_fields: map<Molecule, Grid2D> // Each molecule has a 2D concentration grid
+    temperature_field: Grid2D
+    pH_field: Grid2D
+    nutrient_profile: NutrientProfile
+    time: float // simulation time in hours
+}
+
+// --- Initialization ---
+
+// Create empty 2D grid with initial value
+fn create_grid(width: int, height: int, initial_value: float) -> Grid2D {
+    let grid = []
+    for _ in 0 to height - 1 {
+        let row = []
+        for _ in 0 to width - 1 {
+            row.append(initial_value)
+        }
+        grid.append(row)
+    }
+    return grid
+}
+
+// Initialize environment from template
+fn create_environment(template: EnvironmentTemplate, width: int, height: int) -> Environment {
+    // Initialize molecule fields with zero concentration
+    let molecule_fields = map<Molecule, Grid2D>{}
+    for mol in Molecule.values() {
+        molecule_fields[mol] = create_grid(width, height, 0.0)
+    }
+
+    // Temperature defaults to 37C (human body) for tissue, room temp for petri dish
+    let temp_init = match template {
+        EnvironmentTemplate.PETRI_DISH => 22.0,
+        EnvironmentTemplate.TISSUE_SAMPLE => 37.0,
+        EnvironmentTemplate.GRADIENT_FIELD => 37.0,
+    }
+
+    // pH default neutral 7.0
+    let pH_init = 7.0
+
+    // Nutrient profiles (can be extended)
+    let nutrient_profile = define_nutrient_profile("standard")
+
+    Environment{
+        width: width,
+        height: height,
+        molecule_fields: molecule_fields,
+        temperature_field: create_grid(width, height, temp_init),
+        pH_field: create_grid(width, height, pH_init),
+        nutrient_profile: nutrient_profile,
+        time: 0.0
+    }
+}
+
+// --- Nutrient Profiles ---
+
+fn define_nutrient_profile(profile_name: str) -> NutrientProfile {
+    if profile_name == "standard" {
+        return NutrientProfile{
+            name: "standard",
+            base_concentrations: map<Molecule, float>{
+                Molecule.OXYGEN => 0.21,       // atmospheric O2 fraction
+                Molecule.GLUCOSE => 5.5,      // mM typical blood glucose
+                Molecule.AMINO_ACIDS => 1.0,
+                Molecule.MORPHOGEN_A => 0.0,
+                Molecule.MORPHOGEN_B => 0.0,
+                Molecule.TOXINS => 0.0
+            },
+            diffusion_rates: map<Molecule, float>{
+                Molecule.OXYGEN => 2.0,
+                Molecule.GLUCOSE => 1.0,
+                Molecule.AMINO_ACIDS => 0.8,
+                Molecule.MORPHOGEN_A => 0.5,
+                Molecule.MORPHOGEN_B => 0.5,
+                Molecule.TOXINS => 0.1
+            },
+            consumption_rates: map<Molecule, float>{
+                Molecule.OXYGEN => 0.02,
+                Molecule.GLUCOSE => 0.01,
+                Molecule.AMINO_ACIDS => 0.005,
+                Molecule.MORPHOGEN_A => 0.0,
+                Molecule.MORPHOGEN_B => 0.0,
+                Molecule.TOXINS => 0.0
+            }
+        }
+    }
+    // Other profiles can be added here
+    error("Unknown nutrient profile: " + profile_name)
+}
+
+// --- Environment Modification ---
+
+// Set concentration of a molecule within a rectangular region
+fn set_concentration(env: Environment, region: Region, molecule: Molecule, amount: float) -> Environment {
+    for y in region.top_left.1 to region.bottom_right.1 {
+        for x in region.top_left.0 to region.bottom_right.0 {
+            if x >= 0 && x < env.width && y >= 0 && y < env.height {
+                env.molecule_fields[molecule][y][x] = amount
+            }
+        }
+    }
+    return env
+}
+
+// Apply a spatial gradient of a molecule (linear gradient along x-axis)
+fn apply_gradient(env: Environment, molecule: Molecule, start_conc: float, end_conc: float) -> Environment {
+    for y in 0 to env.height - 1 {
+        for x in 0 to env.width - 1 {
+            let fraction = x / float(env.width - 1)
+            env.molecule_fields[molecule][y][x] = start_conc * (1.0 - fraction) + end_conc * fraction
+        }
+    }
+    return env
+}
+
+// Update environmental chemical concentrations by diffusion (simple discrete Laplacian)
+fn update_diffusion(env: Environment, dt: float) -> Environment {
+    for mol in env.molecule_fields.keys() {
+        let grid = env.molecule_fields[mol]
+        let diff_rate = env.nutrient_profile.diffusion_rates[mol]
+        let new_grid = create_grid(env.width, env.height, 0.0)
+        for y in 0 to env.height - 1 {
+            for x in 0 to env.width - 1 {
+                let center = grid[y][x]
+                let neighbors = []
+                if y > 0 { neighbors.append(grid[y-1][x]) }
+                if y < env.height - 1 { neighbors.append(grid[y+1][x]) }
+                if x > 0 { neighbors.append(grid[y][x-1]) }
+                if x < env.width - 1 { neighbors.append(grid[y][x+1]) }
+
+                let laplacian = neighbors.sum() - neighbors.length * center
+                let diffusion_step = diff_rate * dt * laplacian
+
+                new_grid[y][x] = center + diffusion_step
+                if new_grid[y][x] < 0.0 { new_grid[y][x] = 0.0 } // Clamp negatives
+            }
+        }
+        env.molecule_fields[mol] = new_grid
+    }
+    return env
+}
+
+// Update environmental temperature and pH over time or by external influence (stub for now)
+fn update_environment_conditions(env: Environment, dt: float) -> Environment {
+    // Example: temperature drifts slowly toward room temp 22C
+    for y in 0 to env.height - 1 {
+        for x in 0 to env.width - 1 {
+            let temp = env.temperature_field[y][x]
+            let drift = 0.01 * dt * (22.0 - temp)
+            env.temperature_field[y][x] = temp + drift
+        }
+    }
+
+    // Example: pH buffered near 7.4
+    for y in 0 to env.height - 1 {
+        for x in 0 to env.width - 1 {
+            let pH = env.pH_field[y][x]
+            let drift = 0.005 * dt * (7.4 - pH)
+            env.pH_field[y][x] = pH + drift
+        }
+    }
+
+    return env
+}
+
+// --- Example Predefined Environments ---
+
+// Petri dish: uniform nutrients with oxygen gradient from edge to center
+fn create_petri_dish(width: int, height: int) -> Environment {
+    let env = create_environment(EnvironmentTemplate.PETRI_DISH, width, height)
+    // Apply oxygen gradient - higher at edges, lower in center
+    apply_gradient(env, Molecule.OXYGEN, 0.21, 0.05)
+}
+
+// Tissue sample: uniform oxygen and glucose, morphogen gradients
+fn create_tissue_sample(width: int, height: int) -> Environment {
+    let env = create_environment(EnvironmentTemplate.TISSUE_SAMPLE, width, height)
+    // Uniform oxygen and glucose
+    set_concentration(env, Region{(0,0), (width-1, height-1)}, Molecule.OXYGEN, 0.18)
+    set_concentration(env, Region{(0,0), (width-1, height-1)}, Molecule.GLUCOSE, 5.0)
+    // Morphogen gradients A and B
+    apply_gradient(env, Molecule.MORPHOGEN_A, 1.0, 0.0)
+    apply_gradient(env, Molecule.MORPHOGEN_B, 0.0, 1.0)
+}
+
+// --- Utility for Printing (Debug) ---
+
+fn print_concentration_slice(env: Environment, molecule: Molecule, row: int) {
+    let grid = env.molecule_fields[molecule]
+    print("Concentration for " + molecule.to_str() + " at row " + row.to_str() + ": ")
+    for x in 0 to env.width - 1 {
+        print(format!("{:.2} ", grid[row][x]))
+    }
+    println()
+}
+

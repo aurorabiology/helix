@@ -1,0 +1,148 @@
+// wetlab.hl
+// Module: Interfaces for lab robotics and automated lab platforms
+
+import std.time
+import std.logging
+import std.collections
+
+// --- Device abstractions ---
+
+// Supported robotic platforms enum
+enum RobotPlatform {
+    Hamilton,
+    Opentrons
+}
+
+// LabDevice represents a generic lab device (robot, thermocycler, etc)
+struct LabDevice {
+    id: str
+    platform: RobotPlatform
+    connected: bool
+    temperature: float
+}
+
+// --- Core commands ---
+
+// Pipette liquid from one container to another
+fn pipette(from: str, to: str, volume_ul: float, device: LabDevice) -> Result<str, str> {
+    if !device.connected {
+        return Err("Device not connected: " + device.id)
+    }
+    if volume_ul <= 0 {
+        return Err("Volume must be positive")
+    }
+    // Simulate sending command to device
+    log("Pipetting " + volume_ul.to_str() + " µL from " + from + " to " + to + " using " + device.id)
+    // In real implementation: send command via API/protocol to robot
+    delay(500) // simulate delay
+    return Ok("Pipette successful")
+}
+
+// Set device temperature (e.g., thermocycler, incubator)
+fn set_temperature(device: LabDevice, degrees_celsius: float) -> Result<str, str> {
+    if !device.connected {
+        return Err("Device not connected: " + device.id)
+    }
+    log("Setting temperature of device " + device.id + " to " + degrees_celsius.to_str() + "°C")
+    // In real implementation: send command to hardware
+    device.temperature = degrees_celsius
+    delay(1000) // simulate temperature ramp time
+    return Ok("Temperature set")
+}
+
+// Calibrate a robotic device
+fn calibrate(device: LabDevice) -> Result<str, str> {
+    if !device.connected {
+        return Err("Device not connected: " + device.id)
+    }
+    log("Calibrating device " + device.id + " on platform " + device.platform.to_str())
+    // In real implementation: run calibration routine, e.g., tip position checks
+    delay(2000) // simulate calibration time
+    return Ok("Calibration successful")
+}
+
+// --- Protocol execution ---
+
+// Represents a single protocol step
+struct ProtocolStep {
+    action: str          // e.g., "pipette", "set_temperature", "wait"
+    params: map<str, any> // parameter names and values
+}
+
+// Represents a full protocol as a list of steps
+struct Protocol {
+    name: str
+    steps: array<ProtocolStep>
+    device: LabDevice
+}
+
+// Run the protocol sequentially
+fn run_protocol(protocol: Protocol) -> Result<str, str> {
+    log("Starting protocol: " + protocol.name)
+    for step in protocol.steps {
+        match step.action {
+            "pipette" => {
+                let from = step.params.get("from")?.to_str()
+                let to = step.params.get("to")?.to_str()
+                let vol = step.params.get("volume_ul")?.to_float()
+                let res = pipette(from, to, vol, protocol.device)
+                if res.is_err() { return Err("Pipette step failed: " + res.unwrap_err()) }
+            }
+            "set_temperature" => {
+                let temp = step.params.get("degrees_celsius")?.to_float()
+                let res = set_temperature(protocol.device, temp)
+                if res.is_err() { return Err("Temperature step failed: " + res.unwrap_err()) }
+            }
+            "wait" => {
+                let ms = step.params.get("milliseconds")?.to_int()
+                log("Waiting " + ms.to_str() + " milliseconds")
+                delay(ms)
+            }
+            _ => {
+                return Err("Unknown protocol step action: " + step.action)
+            }
+        }
+    }
+    log("Protocol " + protocol.name + " completed successfully")
+    return Ok("Protocol run complete")
+}
+
+// --- Utility functions ---
+
+// Simple delay function to simulate time-consuming operations
+fn delay(milliseconds: int) {
+    // For demo: block current thread or event loop for given ms
+    // In real HelixLang, use async sleep or timers if available
+    std.time.sleep_ms(milliseconds)
+}
+
+// Simple logging wrapper
+fn log(msg: str) {
+    let timestamp = std.time.now().to_string()
+    println("[" + timestamp + "] [wetlab.hl] " + msg)
+}
+
+// --- Example usage ---
+
+fn example() {
+    let device = LabDevice{id: "HAMILTON-01", platform: RobotPlatform.Hamilton, connected: true, temperature: 25.0}
+
+    let steps = [
+        ProtocolStep{action:"pipette", params: {"from": "Tube1", "to": "PlateA1", "volume_ul": 50.0}},
+        ProtocolStep{action:"set_temperature", params: {"degrees_celsius": 37.0}},
+        ProtocolStep{action:"wait", params: {"milliseconds": 2000}},
+        ProtocolStep{action:"pipette", params: {"from": "Tube2", "to": "PlateA1", "volume_ul": 20.0}}
+    ]
+
+    let protocol = Protocol{name: "DNA Amplification Prep", steps: steps, device: device}
+
+    match calibrate(device) {
+        Ok(msg) => log(msg),
+        Err(e) => log("Calibration error: " + e)
+    }
+
+    match run_protocol(protocol) {
+        Ok(msg) => log(msg),
+        Err(e) => log("Protocol error: " + e)
+    }
+}
